@@ -1,1 +1,51 @@
-{"name":"pipeline.yml","path":".github/workflows/pipeline.yml","sha":"109d0e82be19ebee086e7b49c193d168a7742098","size":2425,"url":"https://api.github.com/repos/prajwalts04/ptsmovies-pipeline/contents/.github/workflows/pipeline.yml?ref=main","html_url":"https://github.com/prajwalts04/ptsmovies-pipeline/blob/main/.github/workflows/pipeline.yml","git_url":"https://api.github.com/repos/prajwalts04/ptsmovies-pipeline/git/blobs/109d0e82be19ebee086e7b49c193d168a7742098","download_url":"https://raw.githubusercontent.com/prajwalts04/ptsmovies-pipeline/main/.github/workflows/pipeline.yml","type":"file","content":"bmFtZTogUFRTIFBpcGVsaW5lCm9uOgogIHdvcmtmbG93X2Rpc3BhdGNoOgog\nICAgaW5wdXRzOgogICAgICBqb2JfaWQ6IHtkZXNjcmlwdGlvbjogJ0pvYiBJ\nRCcsIHJlcXVpcmVkOiB0cnVlfQogICAgICBkb3dubG9hZF91cmw6IHtkZXNj\ncmlwdGlvbjogJ1VSTCcsIHJlcXVpcmVkOiB0cnVlfQogICAgICBpbWRiX2lk\nOiB7ZGVzY3JpcHRpb246ICdJTURiJywgcmVxdWlyZWQ6IHRydWV9CiAgICAg\nIHRpdGxlOiB7ZGVzY3JpcHRpb246ICdUaXRsZScsIHJlcXVpcmVkOiB0cnVl\nfQogICAgICBjb250ZW50X3R5cGU6IHtkZXNjcmlwdGlvbjogJ1R5cGUnLCBy\nZXF1aXJlZDogdHJ1ZX0KICAgICAgbGFiZWw6IHtkZXNjcmlwdGlvbjogJ0xh\nYmVsJywgcmVxdWlyZWQ6IHRydWV9CiAgICAgIHZwc193ZWJob29rX3VybDog\ne2Rlc2NyaXB0aW9uOiAnV2ViaG9vaycsIHJlcXVpcmVkOiB0cnVlfQpqb2Jz\nOgogIHByb2Nlc3M6CiAgICBydW5zLW9uOiB1YnVudHUtbGF0ZXN0CiAgICBz\ndGVwczoKICAgICAgLSB1c2VzOiBhY3Rpb25zL2NoZWNrb3V0QHY0CiAgICAg\nIC0gdXNlczogYWN0aW9ucy9zZXR1cC1weXRob25AdjUKICAgICAgICB3aXRo\nOiB7cHl0aG9uLXZlcnNpb246ICczLjExJ30KICAgICAgLSBuYW1lOiBJbnN0\nYWxsIGRlcHMKICAgICAgICBydW46IHwKICAgICAgICAgIHBpcCBpbnN0YWxs\nIHl0LWRscCBodWdnaW5nZmFjZV9odWIgcmVxdWVzdHMKICAgICAgICAgIHN1\nZG8gYXB0LWdldCB1cGRhdGUgJiYgc3VkbyBhcHQtZ2V0IGluc3RhbGwgLXkg\nZmZtcGVnIGFyaWEyCiAgICAgIC0gbmFtZTogUnVuCiAgICAgICAgZW52Ogog\nICAgICAgICAgSk9CX0lEOiAke3sgZ2l0aHViLmV2ZW50LmlucHV0cy5qb2Jf\naWQgfX0KICAgICAgICAgIERPV05MT0FEX1VSTDogJHt7IGdpdGh1Yi5ldmVu\ndC5pbnB1dHMuZG93bmxvYWRfdXJsIH19CiAgICAgICAgICBJTURCX0lEOiAk\ne3sgZ2l0aHViLmV2ZW50LmlucHV0cy5pbWRiX2lkIH19CiAgICAgICAgICBU\nSVRMRTogJHt7IGdpdGh1Yi5ldmVudC5pbnB1dHMudGl0bGUgfX0KICAgICAg\nICAgIENPTlRFTlRfVFlQRTogJHt7IGdpdGh1Yi5ldmVudC5pbnB1dHMuY29u\ndGVudF90eXBlIH19CiAgICAgICAgICBMQUJFTDogJHt7IGdpdGh1Yi5ldmVu\ndC5pbnB1dHMubGFiZWwgfX0KICAgICAgICAgIFZQU19XRUJIT09LX1VSTDog\nJHt7IGdpdGh1Yi5ldmVudC5pbnB1dHMudnBzX3dlYmhvb2tfdXJsIH19CiAg\nICAgICAgICBXRUJIT09LX1NFQ1JFVDogJHt7IHNlY3JldHMuV0VCSE9PS19T\nRUNSRVQgfX0KICAgICAgICAgIEhGX1RPS0VOOiAke3sgc2VjcmV0cy5IRl9U\nT0tFTiB9fQogICAgICAgICAgSEZfUkVQT19JRDogJHt7IHNlY3JldHMuSEZf\nUkVQT19JRCB9fQogICAgICAgIHJ1bjogcHl0aG9uIHNjcmlwdHMvcHJvY2Vz\ncy5weQogICAgICAtIG5hbWU6IFJlcG9ydCBmYWlsdXJlCiAgICAgICAgaWY6\nICR7eyBmYWlsdXJlKCkgfX0KICAgICAgICBlbnY6CiAgICAgICAgICBKT0Jf\nSUQ6ICR7eyBnaXRodWIuZXZlbnQuaW5wdXRzLmpvYl9pZCB9fQogICAgICAg\nICAgVlBTX1dFQkhPT0tfVVJMOiAke3sgZ2l0aHViLmV2ZW50LmlucHV0cy52\ncHNfd2ViaG9va191cmwgfX0KICAgICAgICAgIFdFQkhPT0tfU0VDUkVUOiAk\ne3sgc2VjcmV0cy5XRUJIT09LX1NFQ1JFVCB9fQogICAgICAgIHJ1bjogfAog\nICAgICAgICAgY3VybCAtcyAtWCBQT1NUICIkVlBTX1dFQkhPT0tfVVJMIiAt\nSCAnQ29udGVudC1UeXBlOiBhcHBsaWNhdGlvbi9qc29uJyAtZCAie1wiam9i\nX2lkXCI6IFwiJEpPQl9JRFwiLCBcInN0YWdlXCI6IFwiZmFpbGVkXCIsIFwi\ncHJvZ3Jlc3NcIjogMCwgXCJlcnJvclwiOiBcIkdpdEh1YiBqb2IgZmFpbGVk\nXCIsIFwic2VjcmV0XCI6IFwiJFdFQkhPT0tfU0VDUkVUXCJ9IiB8fCB0cnVl\nCiAgICAgIC0gbmFtZTogUmVwb3J0IHRpbWVvdXQgb3IgY2FuY2VsCiAgICAg\nICAgaWY6ICR7eyBjYW5jZWxsZWQoKSB9fQogICAgICAgIGVudjoKICAgICAg\nICAgIEpPQl9JRDogJHt7IGdpdGh1Yi5ldmVudC5pbnB1dHMuam9iX2lkIH19\nCiAgICAgICAgICBWUFNfV0VCSE9PS19VUkw6ICR7eyBnaXRodWIuZXZlbnQu\naW5wdXRzLnZwc193ZWJob29rX3VybCB9fQogICAgICAgICAgV0VCSE9PS19T\nRUNSRVQ6ICR7eyBzZWNyZXRzLldFQkhPT0tfU0VDUkVUIH19CiAgICAgICAg\ncnVuOiB8CiAgICAgICAgICBjdXJsIC1zIC1YIFBPU1QgIiRWUFNfV0VCSE9P\nS19VUkwiIC1IICdDb250ZW50LVR5cGU6IGFwcGxpY2F0aW9uL2pzb24nIC1k\nICJ7XCJqb2JfaWRcIjogXCIkSk9CX0lEXCIsIFwic3RhZ2VcIjogXCJmYWls\nZWRcIiwgXCJwcm9ncmVzc1wiOiAwLCBcImVycm9yXCI6IFwiR2l0SHViIGpv\nYiB0aW1lZCBvdXQgKDZoIGxpbWl0KSBvciB3YXMgY2FuY2VsbGVkXCIsIFwi\nc2VjcmV0XCI6IFwiJFdFQkhPT0tfU0VDUkVUXCJ9IiB8fCB0cnVlCg==\n","encoding":"base64","_links":{"self":"https://api.github.com/repos/prajwalts04/ptsmovies-pipeline/contents/.github/workflows/pipeline.yml?ref=main","git":"https://api.github.com/repos/prajwalts04/ptsmovies-pipeline/git/blobs/109d0e82be19ebee086e7b49c193d168a7742098","html":"https://github.com/prajwalts04/ptsmovies-pipeline/blob/main/.github/workflows/pipeline.yml"}}
+name: PTS Pipeline
+on:
+  workflow_dispatch:
+    inputs:
+      job_id: {description: 'Job ID', required: true}
+      download_url: {description: 'URL', required: true}
+      imdb_id: {description: 'IMDb', required: true}
+      title: {description: 'Title', required: true}
+      content_type: {description: 'Type', required: true}
+      label: {description: 'Label', required: true}
+      vps_webhook_url: {description: 'Webhook', required: true}
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install deps
+        run: |
+          pip install yt-dlp huggingface_hub requests
+          sudo apt-get update && sudo apt-get install -y ffmpeg aria2
+      - name: Run
+        env:
+          JOB_ID: ${{ github.event.inputs.job_id }}
+          DOWNLOAD_URL: ${{ github.event.inputs.download_url }}
+          IMDB_ID: ${{ github.event.inputs.imdb_id }}
+          TITLE: ${{ github.event.inputs.title }}
+          CONTENT_TYPE: ${{ github.event.inputs.content_type }}
+          LABEL: ${{ github.event.inputs.label }}
+          VPS_WEBHOOK_URL: ${{ github.event.inputs.vps_webhook_url }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_REPO_ID: ${{ secrets.HF_REPO_ID }}
+        run: python scripts/process.py
+      - name: Report failure
+        if: ${{ failure() }}
+        env:
+          JOB_ID: ${{ github.event.inputs.job_id }}
+          VPS_WEBHOOK_URL: ${{ github.event.inputs.vps_webhook_url }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+        run: |
+          curl -s -X POST "$VPS_WEBHOOK_URL" -H 'Content-Type: application/json' -d "{\"job_id\": \"$JOB_ID\", \"stage\": \"failed\", \"progress\": 0, \"error\": \"GitHub job failed\", \"secret\": \"$WEBHOOK_SECRET\"}" || true
+      - name: Report timeout or cancel
+        if: ${{ cancelled() }}
+        env:
+          JOB_ID: ${{ github.event.inputs.job_id }}
+          VPS_WEBHOOK_URL: ${{ github.event.inputs.vps_webhook_url }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+        run: |
+          curl -s -X POST "$VPS_WEBHOOK_URL" -H 'Content-Type: application/json' -d "{\"job_id\": \"$JOB_ID\", \"stage\": \"failed\", \"progress\": 0, \"error\": \"GitHub job timed out (6h limit) or was cancelled\", \"secret\": \"$WEBHOOK_SECRET\"}" || true
