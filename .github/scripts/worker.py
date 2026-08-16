@@ -246,59 +246,18 @@ def upload_to_huggingface(file_path, hf_repo, hf_token, hf_path, task_id, callba
         "stage": "gha_uploading_hf",
         "progress": 0,
         "speed": "0 KB/s",
-        "eta": "Calculating...",
+        "eta": "Uploading...",
         "total": format_bytes(file_size),
-        "message": f"Connecting to Hugging Face dataset ({format_bytes(file_size)})..."
+        "message": f"Uploading to Hugging Face dataset ({format_bytes(file_size)})..."
     })
 
     api = HfApi(token=hf_token)
-    
-    start_time = time.time()
-    last_callback_time = 0
-
-    class ProgressReader:
-        def __init__(self, fileobj, total_bytes):
-            self._fileobj = fileobj
-            self._total = total_bytes
-            self._read = 0
-
-        def read(self, size=-1):
-            chunk = self._fileobj.read(size)
-            if chunk:
-                self._read += len(chunk)
-                nonlocal last_callback_time, start_time
-                now = time.time()
-                if now - last_callback_time >= 1.5 or self._read >= self._total:
-                    elapsed = now - start_time
-                    speed = self._read / elapsed if elapsed > 0 else 0
-                    pct = min(99, max(0, round((self._read / self._total) * 100)))
-                    rem_bytes = max(0, self._total - self._read)
-                    eta = rem_bytes / speed if speed > 0 else 0
-
-                    send_callback(callback_url, callback_secret, {
-                        "taskId": task_id,
-                        "stage": "gha_uploading_hf",
-                        "progress": pct,
-                        "speed": format_speed(speed),
-                        "eta": format_eta(eta),
-                        "transferred": format_bytes(self._read),
-                        "total": format_bytes(self._total),
-                        "message": f"Uploading to HF dataset: {format_bytes(self._read)} / {format_bytes(self._total)}"
-                    })
-                    last_callback_time = now
-            return chunk
-
-        def __getattr__(self, attr):
-            return getattr(self._fileobj, attr)
-
-    with open(file_path, "rb") as raw_f:
-        wrapped_f = ProgressReader(raw_f, file_size)
-        api.upload_file(
-            path_or_fileobj=wrapped_f,
-            path_in_repo=hf_path,
-            repo_id=hf_repo,
-            repo_type="dataset"
-        )
+    api.upload_file(
+        path_or_fileobj=file_path,
+        path_in_repo=hf_path,
+        repo_id=hf_repo,
+        repo_type="dataset"
+    )
 
     hf_direct_url = f"https://huggingface.co/datasets/{hf_repo}/resolve/main/{hf_path}"
     
