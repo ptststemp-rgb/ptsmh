@@ -1,0 +1,71 @@
+name: PTSLibrary Transcode & Relay Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: 'Unique Task ID'
+        required: true
+        type: string
+      download_url:
+        description: 'Direct Download / Source URL'
+        required: true
+        type: string
+      filename:
+        description: 'Target Output Filename (e.g. Movie (2024) [480p x265].mkv)'
+        required: true
+        type: string
+      hf_repo:
+        description: 'Hugging Face Dataset Repository (username/dataset)'
+        required: true
+        type: string
+      hf_token:
+        description: 'Hugging Face Write Token'
+        required: true
+        type: string
+      callback_url:
+        description: 'Raspberry Pi Webhook Callback URL'
+        required: true
+        type: string
+      callback_secret:
+        description: 'Shared Worker Secret'
+        required: false
+        type: string
+
+jobs:
+  transcode_and_relay:
+    name: Transcode 480p x265 & Upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: '**/requirements.txt'
+
+      - name: Install FFmpeg & System Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y ffmpeg aria2
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install huggingface_hub requests tqdm
+
+      - name: Execute Transcode & Hugging Face Relay Worker
+        run: |
+          python .github/scripts/worker.py \
+            --task-id "${{ github.event.inputs.task_id }}" \
+            --download-url "${{ github.event.inputs.download_url }}" \
+            --filename "${{ github.event.inputs.filename }}" \
+            --hf-repo "${{ github.event.inputs.hf_repo }}" \
+            --hf-token "${{ github.event.inputs.hf_token }}" \
+            --callback-url "${{ github.event.inputs.callback_url }}" \
+            --callback-secret "${{ github.event.inputs.callback_secret }}"
