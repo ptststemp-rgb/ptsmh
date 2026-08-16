@@ -172,7 +172,7 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
         "-vf", "scale=-2:480",
         "-c:v", "libx265",
         "-crf", "26",
-        "-preset", "fast",
+        "-preset", "medium",
         "-pix_fmt", "yuv420p",
         "-tag:v", "hvc1",
         "-g", "48",
