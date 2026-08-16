@@ -2,7 +2,7 @@
 """
 PTSLibrary - Automated GitHub Actions Transcode & Hugging Face Relay Worker
 Downloads source media, transcodes to 480p H.265 with all audio tracks (128k),
-and uploads to Hugging Face dataset, streaming progress back to your Raspberry Pi.
+and uploads to Hugging Face dataset, streaming real-time progress back to Raspberry Pi.
 """
 
 import sys
@@ -11,9 +11,7 @@ import time
 import json
 import argparse
 import subprocess
-import urllib.request
-import urllib.error
-from urllib.parse import urlparse
+import requests
 
 try:
     from huggingface_hub import HfApi
@@ -22,26 +20,31 @@ except ImportError:
     from huggingface_hub import HfApi
 
 
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PTSWorker/1.0"
+
+
 def send_callback(callback_url, callback_secret, payload):
     """Sends a real-time progress update back to the Raspberry Pi hub."""
     if not callback_url:
-        print("[Status]", payload)
+        print("[Status]", payload, flush=True)
         return
 
     try:
-        data = json.dumps(payload).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
-            "X-Worker-Secret": callback_secret or ""
+            "User-Agent": USER_AGENT,
+            "x-worker-secret": callback_secret or ""
         }
-        req = urllib.request.Request(callback_url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            pass
+        resp = requests.post(callback_url, json=payload, headers=headers, timeout=12)
+        if resp.status_code != 200:
+            print(f"[Callback Notice] HTTP {resp.status_code}: {resp.text}", flush=True)
     except Exception as e:
         print(f"[Callback Warning] Could not notify hub ({e})", flush=True)
 
 
 def format_bytes(bytes_val):
+    if not bytes_val or bytes_val <= 0:
+        return "0 B"
     if bytes_val < 1024:
         return f"{bytes_val} B"
     elif bytes_val < 1024 * 1024:
@@ -67,34 +70,34 @@ def format_eta(seconds):
 
 
 def download_source(url, output_path, task_id, callback_url, callback_secret):
-    """Downloads the remote source file with real-time speed & ETA tracking."""
-    print(f"[*] Starting download from: {url}")
+    """Downloads the remote source file with real-time speed & ETA tracking using requests."""
+    print(f"[*] Starting download from: {url}", flush=True)
     send_callback(callback_url, callback_secret, {
         "taskId": task_id,
         "stage": "gha_downloading",
         "progress": 0,
         "speed": "0 KB/s",
         "eta": "Calculating...",
-        "message": "Initializing remote source download..."
+        "message": "Connecting to source server..."
     })
 
-    # If aria2c is available, we can use it or python streaming request
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    req = urllib.request.Request(url, headers=headers)
-    
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "*/*"
+    }
+
+    resp = requests.get(url, headers=headers, stream=True, timeout=30)
+    resp.raise_for_status()
+
+    total_size = int(resp.headers.get("content-length", 0))
     start_time = time.time()
     last_callback_time = 0
     downloaded = 0
 
-    with urllib.request.urlopen(req) as response, open(output_path, "wb") as out_file:
-        total_size = response.headers.get("content-length")
-        total_size = int(total_size) if total_size else 0
-
-        chunk_size = 1024 * 512  # 512 KB chunks
-        while True:
-            chunk = response.read(chunk_size)
+    with open(output_path, "wb") as out_file:
+        for chunk in resp.iter_content(chunk_size=512 * 1024):
             if not chunk:
-                break
+                continue
             out_file.write(chunk)
             downloaded += len(chunk)
 
@@ -102,14 +105,14 @@ def download_source(url, output_path, task_id, callback_url, callback_secret):
             if now - last_callback_time >= 1.5 or (total_size and downloaded >= total_size):
                 elapsed = now - start_time
                 speed = downloaded / elapsed if elapsed > 0 else 0
-                pct = round((downloaded / total_size) * 100) if total_size > 0 else 50
+                pct = min(99, max(0, round((downloaded / total_size) * 100))) if total_size > 0 else 50
                 rem_bytes = max(0, total_size - downloaded)
                 eta = rem_bytes / speed if speed > 0 else 0
 
                 send_callback(callback_url, callback_secret, {
                     "taskId": task_id,
                     "stage": "gha_downloading",
-                    "progress": min(99, pct),
+                    "progress": pct,
                     "speed": format_speed(speed),
                     "eta": format_eta(eta),
                     "transferred": format_bytes(downloaded),
@@ -126,7 +129,7 @@ def download_source(url, output_path, task_id, callback_url, callback_secret):
         "eta": "00s",
         "message": "Source download completed."
     })
-    print("[✓] Source download completed successfully.")
+    print("[✓] Source download completed successfully.", flush=True)
 
 
 def get_video_duration(file_path):
@@ -139,7 +142,7 @@ def get_video_duration(file_path):
         out = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode("utf-8").strip()
         return float(out)
     except Exception as e:
-        print(f"[ffprobe error] {e}")
+        print(f"[ffprobe note] {e}", flush=True)
         return 0
 
 
@@ -148,24 +151,19 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
     Transcodes video to 480p H.265 (libx265) and compresses all audio tracks to 128kbps AAC.
     Preserves all audio languages, streams, and subtitles.
     """
-    print("[*] Starting FFmpeg 480p H.265 transcode...")
+    print("[*] Starting FFmpeg 480p H.265 transcode...", flush=True)
     duration = get_video_duration(input_path)
-    print(f"[*] Detected video duration: {duration:.1f}s")
+    print(f"[*] Video duration: {duration:.1f}s", flush=True)
 
     send_callback(callback_url, callback_secret, {
         "taskId": task_id,
         "stage": "gha_compressing",
         "progress": 0,
         "speed": "0x",
-        "eta": "Calculating...",
+        "eta": "Starting...",
         "message": "Starting 480p H.265 encoder (All audios @ 128k)..."
     })
 
-    # FFmpeg command:
-    # -vf "scale=-2:480"
-    # -c:v libx265 -crf 26 -preset fast
-    # -map 0:v:0 -map 0:a -c:a aac -b:a 128k
-    # -map 0:s? -c:s copy
     cmd = [
         "ffmpeg", "-y",
         "-i", input_path,
@@ -174,7 +172,7 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
         "-crf", "26",
         "-preset", "fast",
         "-map", "0:v:0",
-        "-map", "0:a",
+        "-map", "0:a?",
         "-c:a", "aac",
         "-b:a", "128k",
         "-map", "0:s?",
@@ -235,12 +233,12 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
         "eta": "00s",
         "message": "FFmpeg transcode completed successfully."
     })
-    print("[✓] FFmpeg transcode completed.")
+    print("[✓] FFmpeg transcode completed.", flush=True)
 
 
 def upload_to_huggingface(file_path, hf_repo, hf_token, hf_path, task_id, callback_url, callback_secret):
     """Uploads the transcoded file to Hugging Face dataset."""
-    print(f"[*] Uploading to Hugging Face: {hf_repo}/{hf_path}")
+    print(f"[*] Uploading to Hugging Face: {hf_repo}/{hf_path}", flush=True)
     
     file_size = os.path.getsize(file_path)
     send_callback(callback_url, callback_secret, {
@@ -250,12 +248,11 @@ def upload_to_huggingface(file_path, hf_repo, hf_token, hf_path, task_id, callba
         "speed": "0 KB/s",
         "eta": "Calculating...",
         "total": format_bytes(file_size),
-        "message": f"Connecting to Hugging Face Hub dataset ({format_bytes(file_size)})..."
+        "message": f"Connecting to Hugging Face dataset ({format_bytes(file_size)})..."
     })
 
     api = HfApi(token=hf_token)
     
-    # Track progress wrapper
     start_time = time.time()
     last_callback_time = 0
 
@@ -316,7 +313,7 @@ def upload_to_huggingface(file_path, hf_repo, hf_token, hf_path, task_id, callba
         "total": format_bytes(file_size),
         "message": "Successfully uploaded to Hugging Face dataset."
     })
-    print("[✓] Upload to Hugging Face completed.")
+    print("[✓] Upload to Hugging Face completed.", flush=True)
 
 
 def main():
@@ -324,7 +321,7 @@ def main():
     parser.add_argument("--task-id", required=True, help="Task ID")
     parser.add_argument("--download-url", required=True, help="Source media download URL")
     parser.add_argument("--filename", required=True, help="Target output filename")
-    parser.add_argument("--hf-repo", required=True, help="Hugging Face Dataset Repo (e.g. username/dataset)")
+    parser.add_argument("--hf-repo", required=True, help="Hugging Face Dataset Repo")
     parser.add_argument("--hf-token", required=True, help="Hugging Face Write Token")
     parser.add_argument("--callback-url", default="", help="Raspberry Pi callback webhook URL")
     parser.add_argument("--callback-secret", default="", help="Worker auth secret")
@@ -339,7 +336,7 @@ def main():
     hf_path = f"temp_transcodes/{args.task_id}_{args.filename}"
 
     try:
-        # Step 1: Download
+        # Step 1: Download Source
         download_source(args.download_url, input_file, args.task_id, args.callback_url, args.callback_secret)
 
         # Step 2: Transcode 480p x265 (All audios 128k)
@@ -348,16 +345,16 @@ def main():
         # Step 3: Upload to Hugging Face
         upload_to_huggingface(output_file, args.hf_repo, args.hf_token, hf_path, args.task_id, args.callback_url, args.callback_secret)
 
-        print("[✓] All workflow worker tasks completed successfully!")
+        print("[✓] All workflow worker tasks completed successfully!", flush=True)
 
     except Exception as e:
-        print(f"[Fatal Error] {e}", file=sys.stderr)
+        print(f"[Fatal Error] {e}", file=sys.stderr, flush=True)
         send_callback(args.callback_url, args.callback_secret, {
             "taskId": args.task_id,
             "stage": "failed",
             "progress": 0,
             "error": str(e),
-            "message": f"Worker encountered an error: {str(e)}"
+            "message": f"Worker Error: {str(e)}"
         })
         sys.exit(1)
 
