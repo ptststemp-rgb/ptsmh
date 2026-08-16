@@ -164,6 +164,8 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
         "message": "Starting 480p H.265 encoder (All audios @ 128k)..."
     })
 
+    is_mp4 = output_path.lower().endswith(('.mp4', '.m4v', '.mov'))
+    
     cmd = [
         "ffmpeg", "-y",
         "-i", input_path,
@@ -171,16 +173,31 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
         "-c:v", "libx265",
         "-crf", "26",
         "-preset", "fast",
+        "-pix_fmt", "yuv420p",
+        "-tag:v", "hvc1",
+        "-g", "48",
+        "-keyint_min", "48",
+        "-sc_threshold", "0",
         "-map", "0:v:0",
         "-map", "0:a?",
         "-c:a", "aac",
         "-b:a", "128k",
+        "-ac", "2",
+        "-ar", "48000",
         "-map", "0:s?",
-        "-c:s", "copy",
+        "-c:s", "copy" if not is_mp4 else "mov_text"
+    ]
+    
+    if is_mp4:
+        cmd.extend(["-movflags", "+faststart"])
+    else:
+        cmd.extend(["-reserve_index_space", "100k", "-cluster_size_limit", "2M", "-cluster_time_limit", "2000"])
+
+    cmd.extend([
         "-progress", "pipe:1",
         "-nostats",
         output_path
-    ]
+    ])
 
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     
