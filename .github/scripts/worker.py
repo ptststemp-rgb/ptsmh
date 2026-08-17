@@ -70,7 +70,7 @@ def format_eta(seconds):
 
 
 def download_source(url, output_path, task_id, callback_url, callback_secret):
-    """Downloads the remote source file with real-time speed & ETA tracking using requests."""
+    """Downloads the remote source file with automatic resume, retry, and real-time speed/ETA tracking."""
     print(f"[*] Starting download from: {url}", flush=True)
     send_callback(callback_url, callback_secret, {
         "taskId": task_id,
@@ -86,40 +86,86 @@ def download_source(url, output_path, task_id, callback_url, callback_secret):
         "Accept": "*/*"
     }
 
-    resp = requests.get(url, headers=headers, stream=True, timeout=30)
-    resp.raise_for_status()
+    max_retries = 5
+    retry_delay = 3
+    downloaded = 0
+    total_size = 0
 
-    total_size = int(resp.headers.get("content-length", 0))
+    try:
+        head_resp = requests.head(url, headers=headers, timeout=15, allow_redirects=True)
+        if head_resp.status_code < 400:
+            total_size = int(head_resp.headers.get("content-length", 0))
+    except Exception:
+        pass
+
     start_time = time.time()
     last_callback_time = 0
-    downloaded = 0
 
-    with open(output_path, "wb") as out_file:
-        for chunk in resp.iter_content(chunk_size=512 * 1024):
-            if not chunk:
+    for attempt in range(1, max_retries + 1):
+        try:
+            req_headers = dict(headers)
+            mode = "wb"
+            if downloaded > 0:
+                req_headers["Range"] = f"bytes={downloaded}-"
+                mode = "ab"
+                print(f"[*] Resuming download from byte {downloaded} (attempt {attempt}/{max_retries})...", flush=True)
+            else:
+                print(f"[*] Connecting to download source (attempt {attempt}/{max_retries})...", flush=True)
+
+            resp = requests.get(url, headers=req_headers, stream=True, timeout=45)
+            if resp.status_code not in (200, 206):
+                resp.raise_for_status()
+
+            if not total_size:
+                if resp.status_code == 206 and "content-range" in resp.headers:
+                    cr = resp.headers["content-range"]
+                    if "/" in cr:
+                        try:
+                            total_size = int(cr.split("/")[1])
+                        except Exception:
+                            pass
+                if not total_size:
+                    total_size = int(resp.headers.get("content-length", 0)) + (downloaded if resp.status_code == 206 else 0)
+
+            with open(output_path, mode) as out_file:
+                for chunk in resp.iter_content(chunk_size=512 * 1024):
+                    if not chunk:
+                        continue
+                    out_file.write(chunk)
+                    downloaded += len(chunk)
+
+                    now = time.time()
+                    if now - last_callback_time >= 1.5 or (total_size and downloaded >= total_size):
+                        elapsed = now - start_time
+                        speed = downloaded / elapsed if elapsed > 0 else 0
+                        pct = min(99, max(0, round((downloaded / total_size) * 100))) if total_size > 0 else 50
+                        rem_bytes = max(0, total_size - downloaded)
+                        eta = rem_bytes / speed if speed > 0 else 0
+
+                        send_callback(callback_url, callback_secret, {
+                            "taskId": task_id,
+                            "stage": "gha_downloading",
+                            "progress": pct,
+                            "speed": format_speed(speed),
+                            "eta": format_eta(eta),
+                            "transferred": format_bytes(downloaded),
+                            "total": format_bytes(total_size) if total_size > 0 else "Unknown",
+                            "message": f"Downloading source: {format_bytes(downloaded)} / {format_bytes(total_size) if total_size > 0 else '...'}"
+                        })
+                        last_callback_time = now
+
+            if total_size > 0 and downloaded < total_size:
+                print(f"[!] Partial download ({downloaded}/{total_size} bytes). Retrying...", flush=True)
+                time.sleep(retry_delay)
                 continue
-            out_file.write(chunk)
-            downloaded += len(chunk)
 
-            now = time.time()
-            if now - last_callback_time >= 1.5 or (total_size and downloaded >= total_size):
-                elapsed = now - start_time
-                speed = downloaded / elapsed if elapsed > 0 else 0
-                pct = min(99, max(0, round((downloaded / total_size) * 100))) if total_size > 0 else 50
-                rem_bytes = max(0, total_size - downloaded)
-                eta = rem_bytes / speed if speed > 0 else 0
+            break
 
-                send_callback(callback_url, callback_secret, {
-                    "taskId": task_id,
-                    "stage": "gha_downloading",
-                    "progress": pct,
-                    "speed": format_speed(speed),
-                    "eta": format_eta(eta),
-                    "transferred": format_bytes(downloaded),
-                    "total": format_bytes(total_size) if total_size > 0 else "Unknown",
-                    "message": f"Downloading source: {format_bytes(downloaded)} / {format_bytes(total_size) if total_size > 0 else '...'}"
-                })
-                last_callback_time = now
+        except Exception as e:
+            print(f"[!] Download attempt {attempt} error: {e}", flush=True)
+            if attempt == max_retries:
+                raise e
+            time.sleep(retry_delay)
 
     send_callback(callback_url, callback_secret, {
         "taskId": task_id,
