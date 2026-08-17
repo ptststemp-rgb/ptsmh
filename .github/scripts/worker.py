@@ -146,6 +146,23 @@ def get_video_duration(file_path):
         return 0
 
 
+def probe_media_streams(file_path):
+    """Inspects all streams in media file using ffprobe to detect text subtitles and audio."""
+    try:
+        cmd = [
+            "ffprobe", "-v", "quiet",
+            "-print_format", "json",
+            "-show_streams",
+            file_path
+        ]
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode("utf-8")
+        data = json.loads(out)
+        return data.get("streams", [])
+    except Exception as e:
+        print(f"[ffprobe probe note] {e}", flush=True)
+        return []
+
+
 def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callback_secret):
     """
     Transcodes video to 480p H.265 (libx265) and compresses all audio tracks to 128kbps AAC.
@@ -161,11 +178,12 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
         "progress": 0,
         "speed": "0x",
         "eta": "Starting...",
-        "message": "Starting 480p H.265 encoder (All audios @ 128k)..."
+        "message": "Starting video encoder..."
     })
 
     is_mp4 = output_path.lower().endswith(('.mp4', '.m4v', '.mov'))
-    
+    streams = probe_media_streams(input_path)
+
     cmd = [
         "ffmpeg", "-y",
         "-i", input_path,
@@ -183,15 +201,40 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
         "-c:a", "aac",
         "-b:a", "128k",
         "-ac", "2",
-        "-ar", "48000",
-        "-map", "0:s?",
-        "-c:s", "copy" if not is_mp4 else "mov_text"
+        "-ar", "48000"
     ]
-    
+
     if is_mp4:
+        # MP4 container ONLY supports text-based subtitles via mov_text codec.
+        # Bitmap subtitles (hdmv_pgs_subtitle, dvd_subtitle, etc.) CANNOT be converted to mov_text
+        # and will cause FFmpeg to fail with error 234 / invalid argument.
+        TEXT_SUBTITLE_CODECS = {
+            'subrip', 'srt', 'ass', 'ssa', 'mov_text', 'webvtt', 'vtt', 'text', 'ttml'
+        }
+        text_sub_indexes = []
+        for s in streams:
+            if s.get("codec_type") == "subtitle":
+                codec = (s.get("codec_name") or "").lower()
+                idx = s.get("index")
+                if codec in TEXT_SUBTITLE_CODECS:
+                    text_sub_indexes.append(idx)
+                else:
+                    print(f"[*] Skipping bitmap/incompatible subtitle stream #{idx} ({codec}) for MP4 container.", flush=True)
+
+        if text_sub_indexes:
+            for idx in text_sub_indexes:
+                cmd.extend(["-map", f"0:{idx}"])
+            cmd.extend(["-c:s", "mov_text"])
+
         cmd.extend(["-movflags", "+faststart"])
     else:
-        cmd.extend(["-reserve_index_space", "100k", "-cluster_size_limit", "2M", "-cluster_time_limit", "2000"])
+        cmd.extend([
+            "-map", "0:s?",
+            "-c:s", "copy",
+            "-reserve_index_space", "100k",
+            "-cluster_size_limit", "2M",
+            "-cluster_time_limit", "2000"
+        ])
 
     cmd.extend([
         "-progress", "pipe:1",
@@ -231,7 +274,7 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
                         "progress": pct,
                         "speed": f"{fps_speed:.2f}x",
                         "eta": format_eta(eta_sec),
-                        "message": f"Transcoding 480p x265 ({pct}% done, {format_eta(eta_sec)} remaining)"
+                        "message": f"Encoding video ({pct}% done, {format_eta(eta_sec)} remaining)"
                     })
                     last_callback_time = now
             except Exception:
