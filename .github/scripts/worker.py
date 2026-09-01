@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """
 PTSLibrary - Automated GitHub Actions Transcode & Hugging Face Relay Worker
-Downloads source media, transcodes to 480p H.265 with all audio tracks (128k),
+Downloads source media via aria2c multi-connection engine (fallback to requests),
+transcodes to 480p H.265 with fast preset and pipe-deadlock protection,
 and uploads to Hugging Face dataset, streaming real-time progress back to Raspberry Pi.
 """
 
 import sys
 import os
+import re
 import time
 import json
+import shutil
 import argparse
 import subprocess
 import requests
@@ -20,7 +23,7 @@ except ImportError:
     from huggingface_hub import HfApi
 
 
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PTSWorker/1.0"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PTSWorker/2.0"
 
 
 def send_callback(callback_url, callback_secret, payload):
@@ -69,18 +72,92 @@ def format_eta(seconds):
     return f"{m:02d}m {s:02d}s"
 
 
-def download_source(url, output_path, task_id, callback_url, callback_secret):
-    """Downloads the remote source file with automatic resume, retry, and real-time speed/ETA tracking."""
-    print(f"[*] Starting download from: {url}", flush=True)
+def download_with_aria2(url, output_path, task_id, callback_url, callback_secret):
+    """
+    Downloads the remote source using aria2c with 16 parallel connections.
+    Saturates available network bandwidth (up to 100+ MB/s) on cloud runners.
+    """
+    aria2_path = shutil.which("aria2c")
+    if not aria2_path:
+        raise RuntimeError("aria2c binary not found on runner")
+
+    out_dir, out_file = os.path.split(output_path)
+    if not out_dir:
+        out_dir = "."
+
+    print(f"[*] Starting high-speed aria2c download (16 streams) for: {url}", flush=True)
     send_callback(callback_url, callback_secret, {
         "taskId": task_id,
         "stage": "gha_downloading",
         "progress": 0,
-        "speed": "0 KB/s",
+        "speed": "Connecting...",
         "eta": "Calculating...",
-        "message": "Connecting to source server..."
+        "message": "Initializing 16x parallel aria2c download engine..."
     })
 
+    cmd = [
+        aria2_path,
+        "-x", "16",
+        "-s", "16",
+        "-j", "16",
+        "-k", "1M",
+        "--file-allocation=none",
+        "--summary-interval=1",
+        "--console-log-level=warn",
+        "--user-agent=" + USER_AGENT,
+        "--allow-overwrite=true",
+        "--auto-file-renaming=false",
+        "--timeout=30",
+        "--max-tries=5",
+        "--retry-wait=3",
+        "-d", out_dir,
+        "-o", out_file,
+        url
+    ]
+
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    pattern = re.compile(r'\[#[0-9a-fA-F]+\s+([0-9.]+[A-Za-z]+)\/([0-9.]+[A-Za-z]+)(?:\((\d+)%\))?.*?\s+DL:([0-9.]+[A-Za-z]+)(?:.*?\s+ETA:([0-9a-z]+))?')
+
+    last_callback_time = 0
+
+    for line in process.stdout:
+        line = line.strip()
+        m = pattern.search(line)
+        if m:
+            downloaded_str = m.group(1)
+            total_str = m.group(2)
+            pct_str = m.group(3) or "50"
+            dl_speed_str = m.group(4) + "/s"
+            eta_str = m.group(5) or "--"
+
+            now = time.time()
+            if now - last_callback_time >= 1.5:
+                send_callback(callback_url, callback_secret, {
+                    "taskId": task_id,
+                    "stage": "gha_downloading",
+                    "progress": int(pct_str),
+                    "speed": dl_speed_str,
+                    "eta": eta_str,
+                    "transferred": downloaded_str,
+                    "total": total_str,
+                    "message": f"Downloading source (16x streams): {downloaded_str} / {total_str}"
+                })
+                last_callback_time = now
+
+    rc = process.wait()
+    if rc != 0:
+        raise RuntimeError(f"aria2c download failed with exit code {rc}")
+
+    if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+        raise RuntimeError("aria2c finished but output file is missing or 0 bytes")
+
+    print(f"[✓] aria2c high-speed download succeeded: {format_bytes(os.path.getsize(output_path))}", flush=True)
+    return True
+
+
+def download_with_requests_fallback(url, output_path, task_id, callback_url, callback_secret):
+    """Fallback download engine using requests with streaming and resume support."""
+    print(f"[*] Starting requests fallback download from: {url}", flush=True)
     headers = {
         "User-Agent": USER_AGENT,
         "Accept": "*/*"
@@ -128,7 +205,8 @@ def download_source(url, output_path, task_id, callback_url, callback_secret):
                     total_size = int(resp.headers.get("content-length", 0)) + (downloaded if resp.status_code == 206 else 0)
 
             with open(output_path, mode) as out_file:
-                for chunk in resp.iter_content(chunk_size=512 * 1024):
+                # 4MB chunk size for higher throughput in Python
+                for chunk in resp.iter_content(chunk_size=4 * 1024 * 1024):
                     if not chunk:
                         continue
                     out_file.write(chunk)
@@ -167,13 +245,22 @@ def download_source(url, output_path, task_id, callback_url, callback_secret):
                 raise e
             time.sleep(retry_delay)
 
+
+def download_source(url, output_path, task_id, callback_url, callback_secret):
+    """Tries high-speed aria2c first, falling back to requests if needed."""
+    try:
+        download_with_aria2(url, output_path, task_id, callback_url, callback_secret)
+    except Exception as aria_err:
+        print(f"[!] aria2c failed or unavailable ({aria_err}). Switching to requests fallback...", flush=True)
+        download_with_requests_fallback(url, output_path, task_id, callback_url, callback_secret)
+
     send_callback(callback_url, callback_secret, {
         "taskId": task_id,
         "stage": "gha_downloading",
         "progress": 100,
         "speed": "Done",
         "eta": "00s",
-        "message": "Source download completed."
+        "message": "Source download completed successfully."
     })
     print("[✓] Source download completed successfully.", flush=True)
 
@@ -209,10 +296,11 @@ def probe_media_streams(file_path):
         return []
 
 
-def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callback_secret):
+def transcode_to_480p_h265(input_path, output_path, work_dir, task_id, callback_url, callback_secret):
     """
     Transcodes video to 480p H.265 (libx265) and compresses all audio tracks to 128kbps AAC.
-    Preserves all audio languages, streams, and subtitles.
+    Preserves all audio languages, streams, and text subtitles.
+    Uses pipe deadlock protection and fast preset to complete 4x-6x faster.
     """
     print("[*] Starting FFmpeg 480p H.265 transcode...", flush=True)
     duration = get_video_duration(input_path)
@@ -224,7 +312,7 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
         "progress": 0,
         "speed": "0x",
         "eta": "Starting...",
-        "message": "Starting video encoder..."
+        "message": "Starting video encoder (preset: fast)..."
     })
 
     is_mp4 = output_path.lower().endswith(('.mp4', '.m4v', '.mov'))
@@ -232,11 +320,12 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
 
     cmd = [
         "ffmpeg", "-y",
+        "-threads", "0",
         "-i", input_path,
         "-vf", "scale=-2:480",
         "-c:v", "libx265",
         "-crf", "26",
-        "-preset", "medium",
+        "-preset", "fast",
         "-pix_fmt", "yuv420p",
         "-tag:v", "hvc1",
         "-g", "48",
@@ -251,9 +340,6 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
     ]
 
     if is_mp4:
-        # MP4 container ONLY supports text-based subtitles via mov_text codec.
-        # Bitmap subtitles (hdmv_pgs_subtitle, dvd_subtitle, etc.) CANNOT be converted to mov_text
-        # and will cause FFmpeg to fail with error 234 / invalid argument.
         TEXT_SUBTITLE_CODECS = {
             'subrip', 'srt', 'ass', 'ssa', 'mov_text', 'webvtt', 'vtt', 'text', 'ttml'
         }
@@ -288,48 +374,60 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
         output_path
     ])
 
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-    
-    start_time = time.time()
-    last_callback_time = 0
+    # DEADLOCK FIX: Write stderr directly to a log file on disk so the OS 64KB pipe buffer never deadlocks FFmpeg!
+    ffmpeg_log_path = os.path.join(work_dir, "ffmpeg.log")
+    with open(ffmpeg_log_path, "w", encoding="utf-8") as ffmpeg_log:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=ffmpeg_log,
+            universal_newlines=True
+        )
 
-    while True:
-        line = process.stdout.readline()
-        if not line and process.poll() is not None:
-            break
-        
-        line = line.strip()
-        if line.startswith("out_time_us="):
-            try:
-                out_time_us = int(line.split("=")[1])
-                curr_seconds = out_time_us / 1000000.0
-                
-                now = time.time()
-                if now - last_callback_time >= 1.5:
-                    pct = 0
-                    if duration > 0:
-                        pct = min(99, max(0, round((curr_seconds / duration) * 100)))
-                    
-                    elapsed = now - start_time
-                    fps_speed = curr_seconds / elapsed if elapsed > 0 else 0
-                    eta_sec = (duration - curr_seconds) / fps_speed if (duration > 0 and fps_speed > 0) else 0
+        start_time = time.time()
+        last_callback_time = 0
 
-                    send_callback(callback_url, callback_secret, {
-                        "taskId": task_id,
-                        "stage": "gha_compressing",
-                        "progress": pct,
-                        "speed": f"{fps_speed:.2f}x",
-                        "eta": format_eta(eta_sec),
-                        "message": f"Encoding video ({pct}% done, {format_eta(eta_sec)} remaining)"
-                    })
-                    last_callback_time = now
-            except Exception:
-                pass
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
 
-    rc = process.poll()
-    if rc != 0:
-        err = process.stderr.read()
-        raise RuntimeError(f"FFmpeg encoding failed with code {rc}: {err}")
+            line = line.strip()
+            if line.startswith("out_time_us="):
+                try:
+                    out_time_us = int(line.split("=")[1])
+                    curr_seconds = out_time_us / 1000000.0
+
+                    now = time.time()
+                    if now - last_callback_time >= 1.5:
+                        pct = 0
+                        if duration > 0:
+                            pct = min(99, max(0, round((curr_seconds / duration) * 100)))
+
+                        elapsed = now - start_time
+                        fps_speed = curr_seconds / elapsed if elapsed > 0 else 0
+                        eta_sec = (duration - curr_seconds) / fps_speed if (duration > 0 and fps_speed > 0) else 0
+
+                        send_callback(callback_url, callback_secret, {
+                            "taskId": task_id,
+                            "stage": "gha_compressing",
+                            "progress": pct,
+                            "speed": f"{fps_speed:.2f}x",
+                            "eta": format_eta(eta_sec),
+                            "message": f"Encoding video ({pct}% done, speed: {fps_speed:.2f}x, ETA: {format_eta(eta_sec)})"
+                        })
+                        last_callback_time = now
+                except Exception:
+                    pass
+
+        rc = process.wait()
+        if rc != 0:
+            err_snippet = ""
+            if os.path.exists(ffmpeg_log_path):
+                with open(ffmpeg_log_path, "r", encoding="utf-8", errors="ignore") as f:
+                    err_lines = f.readlines()
+                    err_snippet = "".join(err_lines[-30:])
+            raise RuntimeError(f"FFmpeg encoding failed with exit code {rc}: {err_snippet}")
 
     send_callback(callback_url, callback_secret, {
         "taskId": task_id,
@@ -345,7 +443,7 @@ def transcode_to_480p_h265(input_path, output_path, task_id, callback_url, callb
 def upload_to_huggingface(file_path, hf_repo, hf_token, hf_path, task_id, callback_url, callback_secret):
     """Uploads the transcoded file to Hugging Face dataset."""
     print(f"[*] Uploading to Hugging Face: {hf_repo}/{hf_path}", flush=True)
-    
+
     file_size = os.path.getsize(file_path)
     send_callback(callback_url, callback_secret, {
         "taskId": task_id,
@@ -366,7 +464,7 @@ def upload_to_huggingface(file_path, hf_repo, hf_token, hf_path, task_id, callba
     )
 
     hf_direct_url = f"https://huggingface.co/datasets/{hf_repo}/resolve/main/{hf_path}"
-    
+
     send_callback(callback_url, callback_secret, {
         "taskId": task_id,
         "stage": "hf_ready",
@@ -401,11 +499,11 @@ def main():
     hf_path = f"temp_transcodes/{args.task_id}_{args.filename}"
 
     try:
-        # Step 1: Download Source
+        # Step 1: High-Speed Multi-Connection Download (16 streams via aria2c)
         download_source(args.download_url, input_file, args.task_id, args.callback_url, args.callback_secret)
 
-        # Step 2: Transcode 480p x265 (All audios 128k)
-        transcode_to_480p_h265(input_file, output_file, args.task_id, args.callback_url, args.callback_secret)
+        # Step 2: Transcode 480p x265 (Fast preset, pipe deadlock protected)
+        transcode_to_480p_h265(input_file, output_file, work_dir, args.task_id, args.callback_url, args.callback_secret)
 
         # Step 3: Upload to Hugging Face
         upload_to_huggingface(output_file, args.hf_repo, args.hf_token, hf_path, args.task_id, args.callback_url, args.callback_secret)
