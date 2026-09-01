@@ -312,7 +312,7 @@ def transcode_to_480p_h265(input_path, output_path, work_dir, task_id, callback_
         "progress": 0,
         "speed": "0x",
         "eta": "Starting...",
-        "message": "Starting video encoder (preset: fast)..."
+        "message": "Starting video encoder (preset: medium)..."
     })
 
     is_mp4 = output_path.lower().endswith(('.mp4', '.m4v', '.mov'))
@@ -325,7 +325,7 @@ def transcode_to_480p_h265(input_path, output_path, work_dir, task_id, callback_
         "-vf", "scale=-2:480",
         "-c:v", "libx265",
         "-crf", "26",
-        "-preset", "fast",
+        "-preset", "medium",
         "-pix_fmt", "yuv420p",
         "-tag:v", "hvc1",
         "-g", "48",
