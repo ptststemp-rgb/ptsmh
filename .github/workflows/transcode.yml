@@ -41,10 +41,6 @@ on:
         description: 'VPS SSH username (for vps mode)'
         required: false
         default: 'root'
-      vps_ssh_key:
-        description: 'VPS SSH private key (for vps mode)'
-        required: false
-        default: ''
       vps_target_path:
         description: 'Target directory on VPS (for vps mode)'
         required: false
@@ -74,7 +70,6 @@ jobs:
           ARIA_PID=$!
           while kill -0 $ARIA_PID 2>/dev/null; do
             sleep 10
-            # Send progress update (aria2c doesn't easily expose JSON progress here, use estimated)
             curl -s -X POST "${{ inputs.callback_url }}" \
               -H "Content-Type: application/json" \
               -H "x-worker-secret: ${{ inputs.callback_secret }}" \
@@ -111,7 +106,6 @@ jobs:
           FFMPEG_PID=$!
           while kill -0 $FFMPEG_PID 2>/dev/null; do
             sleep 15
-            # Send heartbeat progress updates
             FRAME=$(grep "^frame=" ffmpeg_log.txt 2>/dev/null | tail -1 | cut -d= -f2 || echo 0)
             curl -s -X POST "${{ inputs.callback_url }}" \
               -H "Content-Type: application/json" \
@@ -134,25 +128,22 @@ jobs:
       - name: Upload to VPS via SCP
         if: inputs.delivery_mode == 'vps'
         env:
-          VPS_SSH_KEY: ${{ inputs.vps_ssh_key }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           curl -s -X POST "${{ inputs.callback_url }}" \
             -H "Content-Type: application/json" \
             -H "x-worker-secret: ${{ inputs.callback_secret }}" \
             -d "{\"taskId\":\"${{ inputs.task_id }}\",\"stage\":\"gha_uploading_vps\",\"progress\":0,\"message\":\"Uploading directly to VPS via SCP...\"}"
 
-          # Write SSH key
           mkdir -p ~/.ssh
           echo "$VPS_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "${{ inputs.vps_host }}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
-          # Create target dir
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             "${{ inputs.vps_user }}@${{ inputs.vps_host }}" \
             "mkdir -p '${{ inputs.vps_target_path }}'"
 
-          # SCP transfer
           OUTPUT="${{ inputs.filename }}"
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             "$OUTPUT" \
