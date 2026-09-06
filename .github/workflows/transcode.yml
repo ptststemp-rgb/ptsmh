@@ -1,69 +1,202 @@
-name: PTSLibrary Transcode & Relay Pipeline
+name: PTS Transcode Worker
 
 on:
   workflow_dispatch:
     inputs:
       task_id:
-        description: 'Unique Task ID'
+        description: 'Task ID from PTS Hub'
         required: true
-        type: string
       download_url:
-        description: 'Direct Download / Source URL'
+        description: 'Source video URL to download'
         required: true
-        type: string
       filename:
-        description: 'Target Output Filename (e.g. Movie (2024) [480p x265].mkv)'
+        description: 'Output filename'
         required: true
-        type: string
+        default: 'output [480p x265].mp4'
       hf_repo:
-        description: 'Hugging Face Dataset Repository (username/dataset)'
-        required: true
-        type: string
-      hf_token:
-        description: 'Hugging Face Write Token'
-        required: true
-        type: string
-      callback_url:
-        description: 'Raspberry Pi Webhook Callback URL'
-        required: true
-        type: string
-      callback_secret:
-        description: 'Shared Worker Secret'
+        description: 'HuggingFace dataset repo (required for hf mode)'
         required: false
-        type: string
+        default: ''
+      hf_token:
+        description: 'HuggingFace API token (required for hf mode)'
+        required: false
+        default: ''
+      callback_url:
+        description: 'Callback URL for status updates'
+        required: true
+        default: 'https://hub.ptsmovies.online/api/worker/status'
+      callback_secret:
+        description: 'Worker secret for callback authentication'
+        required: false
+        default: ''
+      delivery_mode:
+        description: 'Delivery mode: vps or hf'
+        required: false
+        default: 'vps'
+      vps_host:
+        description: 'VPS host IP or domain (for vps mode)'
+        required: false
+        default: '162.35.188.105'
+      vps_user:
+        description: 'VPS SSH username (for vps mode)'
+        required: false
+        default: 'root'
+      vps_ssh_key:
+        description: 'VPS SSH private key (for vps mode)'
+        required: false
+        default: ''
+      vps_target_path:
+        description: 'Target directory on VPS (for vps mode)'
+        required: false
+        default: '/Data/media'
 
 jobs:
-  transcode_and_relay:
-    name: Transcode 480p x265 & Upload
+  transcode:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 120
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - name: Setup FFmpeg
+        uses: animesh-007/setup-ffmpeg@v1
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install FFmpeg & System Dependencies
+      - name: Notify - Downloading
         run: |
-          sudo apt update
-          sudo apt install -y ffmpeg aria2
+          curl -s -X POST "${{ inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -H "x-worker-secret: ${{ inputs.callback_secret }}" \
+            -d "{\"taskId\":\"${{ inputs.task_id }}\",\"stage\":\"gha_downloading\",\"progress\":0,\"message\":\"Downloading source...\"}"
 
-      - name: Install Python Dependencies
+      - name: Download Source
         run: |
-          python -m pip install --upgrade pip
-          pip install huggingface_hub requests tqdm
+          aria2c --max-connection-per-server=16 --split=16 --min-split-size=1M \
+            --max-tries=5 --retry-wait=3 --file-allocation=none \
+            -o "input_source.mkv" "${{ inputs.download_url }}" &
+          ARIA_PID=$!
+          while kill -0 $ARIA_PID 2>/dev/null; do
+            sleep 10
+            # Send progress update (aria2c doesn't easily expose JSON progress here, use estimated)
+            curl -s -X POST "${{ inputs.callback_url }}" \
+              -H "Content-Type: application/json" \
+              -H "x-worker-secret: ${{ inputs.callback_secret }}" \
+              -d "{\"taskId\":\"${{ inputs.task_id }}\",\"stage\":\"gha_downloading\",\"progress\":50,\"message\":\"Downloading...\"}" || true
+          done
+          wait $ARIA_PID
 
-      - name: Execute Transcode & Hugging Face Relay Worker
+      - name: Get Download Size
         run: |
-          python .github/scripts/worker.py \
-            --task-id "${{ github.event.inputs.task_id }}" \
-            --download-url "${{ github.event.inputs.download_url }}" \
-            --filename "${{ github.event.inputs.filename }}" \
-            --hf-repo "${{ github.event.inputs.hf_repo }}" \
-            --hf-token "${{ github.event.inputs.hf_token }}" \
-            --callback-url "${{ github.event.inputs.callback_url }}" \
-            --callback-secret "${{ github.event.inputs.callback_secret }}"
+          DL_SIZE=$(du -sh input_source.mkv | cut -f1)
+          echo "Downloaded: $DL_SIZE"
+          curl -s -X POST "${{ inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -H "x-worker-secret: ${{ inputs.callback_secret }}" \
+            -d "{\"taskId\":\"${{ inputs.task_id }}\",\"stage\":\"gha_downloading\",\"progress\":100,\"message\":\"Downloaded ($DL_SIZE). Starting encode...\"}"
+
+      - name: Notify - Compressing
+        run: |
+          curl -s -X POST "${{ inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -H "x-worker-secret: ${{ inputs.callback_secret }}" \
+            -d "{\"taskId\":\"${{ inputs.task_id }}\",\"stage\":\"gha_compressing\",\"progress\":0,\"message\":\"480p x265 encoding started...\"}"
+
+      - name: Transcode to 480p x265
+        run: |
+          OUTPUT="${{ inputs.filename }}"
+          ffmpeg -i input_source.mkv \
+            -vf "scale=-2:480" \
+            -c:v libx265 -crf 28 -preset medium \
+            -c:a aac -b:a 128k \
+            -movflags +faststart \
+            -progress pipe:1 \
+            -y "$OUTPUT" 2>&1 | tee ffmpeg_log.txt &
+          FFMPEG_PID=$!
+          while kill -0 $FFMPEG_PID 2>/dev/null; do
+            sleep 15
+            # Send heartbeat progress updates
+            FRAME=$(grep "^frame=" ffmpeg_log.txt 2>/dev/null | tail -1 | cut -d= -f2 || echo 0)
+            curl -s -X POST "${{ inputs.callback_url }}" \
+              -H "Content-Type: application/json" \
+              -H "x-worker-secret: ${{ inputs.callback_secret }}" \
+              -d "{\"taskId\":\"${{ inputs.task_id }}\",\"stage\":\"gha_compressing\",\"progress\":50,\"message\":\"Encoding 480p x265 (frame $FRAME)...\"}" || true
+          done
+          wait $FFMPEG_PID
+
+      - name: Get Output Size
+        run: |
+          OUTPUT="${{ inputs.filename }}"
+          OUT_SIZE=$(du -sh "$OUTPUT" | cut -f1)
+          echo "Output size: $OUT_SIZE"
+          curl -s -X POST "${{ inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -H "x-worker-secret: ${{ inputs.callback_secret }}" \
+            -d "{\"taskId\":\"${{ inputs.task_id }}\",\"stage\":\"gha_compressing\",\"progress\":100,\"message\":\"Encoding complete ($OUT_SIZE). Uploading...\"}"
+
+      # ─── VPS Direct Delivery ─────────────────────────────────────────────
+      - name: Upload to VPS via SCP
+        if: inputs.delivery_mode == 'vps'
+        env:
+          VPS_SSH_KEY: ${{ inputs.vps_ssh_key }}
+        run: |
+          curl -s -X POST "${{ inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -H "x-worker-secret: ${{ inputs.callback_secret }}" \
+            -d "{\"taskId\":\"${{ inputs.task_id }}\",\"stage\":\"gha_uploading_vps\",\"progress\":0,\"message\":\"Uploading directly to VPS via SCP...\"}"
+
+          # Write SSH key
+          mkdir -p ~/.ssh
+          echo "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ inputs.vps_host }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          # Create target dir
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "${{ inputs.vps_user }}@${{ inputs.vps_host }}" \
+            "mkdir -p '${{ inputs.vps_target_path }}'"
+
+          # SCP transfer
+          OUTPUT="${{ inputs.filename }}"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            "$OUTPUT" \
+            "${{ inputs.vps_user }}@${{ inputs.vps_host }}:${{ inputs.vps_target_path }}/"
+
+          echo "SCP transfer complete!"
+          curl -s -X POST "${{ inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -H "x-worker-secret: ${{ inputs.callback_secret }}" \
+            -d "{\"taskId\":\"${{ inputs.task_id }}\",\"stage\":\"vps_delivered\",\"progress\":100,\"message\":\"File delivered to VPS at ${{ inputs.vps_target_path }}\"}"
+
+      # ─── HuggingFace Delivery (legacy) ───────────────────────────────────
+      - name: Upload to HuggingFace
+        if: inputs.delivery_mode != 'vps'
+        run: |
+          OUTPUT="${{ inputs.filename }}"
+          HF_PATH="temp_transcodes/${{ inputs.task_id }}_${OUTPUT}"
+
+          curl -s -X POST "${{ inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -H "x-worker-secret: ${{ inputs.callback_secret }}" \
+            -d "{\"taskId\":\"${{ inputs.task_id }}\",\"stage\":\"gha_uploading_hf\",\"progress\":0,\"message\":\"Uploading to HuggingFace...\"}"
+
+          pip install -q huggingface_hub
+          python3 -c "
+          from huggingface_hub import HfApi
+          api = HfApi()
+          api.upload_file(
+            path_or_fileobj='$OUTPUT',
+            path_in_repo='$HF_PATH',
+            repo_id='${{ inputs.hf_repo }}',
+            repo_type='dataset',
+            token='${{ inputs.hf_token }}'
+          )
+          print('Upload complete.')
+          "
+
+          HF_URL="https://huggingface.co/datasets/${{ inputs.hf_repo }}/resolve/main/$HF_PATH"
+          curl -s -X POST "${{ inputs.callback_url }}" \
+            -H "Content-Type: application/json" \
+            -H "x-worker-secret: ${{ inputs.callback_secret }}" \
+            -d "{\"taskId\":\"${{ inputs.task_id }}\",\"stage\":\"hf_ready\",\"progress\":100,\"hfFilePath\":\"$HF_PATH\",\"hfDownloadUrl\":\"$HF_URL\",\"message\":\"File ready on HuggingFace!\"}"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f input_source.mkv ffmpeg_log.txt ~/.ssh/deploy_key || true
