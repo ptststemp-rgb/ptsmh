@@ -1,0 +1,35 @@
+name: Process Media
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        required: true
+      download_link:
+        required: true
+      target_dir:
+        required: true
+      target_file:
+        required: true
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y aria2 ffmpeg
+      - name: Run Worker
+        env:
+          JOB_ID: ${{ github.event.inputs.job_id }}
+          DOWNLOAD_LINK: ${{ github.event.inputs.download_link }}
+          TARGET_DIR: ${{ github.event.inputs.target_dir }}
+          TARGET_FILE: ${{ github.event.inputs.target_file }}
+          VPS_IP: ${{ secrets.VPS_IP }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_KEY: ${{ secrets.VPS_KEY }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+        run: |
+          curl -s http://${{ secrets.VPS_IP }}/scripts/action_worker.py -o worker.py
+          python3 worker.py
