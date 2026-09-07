@@ -31,5 +31,5 @@ jobs:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
         run: |
-          curl -s http://${{ secrets.VPS_IP }}/scripts/action_worker.py -o worker.py
+          curl -sL https://hub.ptsmovies.online/scripts/action_worker.py -o worker.py
           python3 worker.py
